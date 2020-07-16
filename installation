@@ -1,0 +1,73 @@
+Установка zabbix 5 c postgres + timescaleDB вместо MariaDB и nginx вместо apache
+
+0. prereq
+качаем и устанавливаем ubuntu 20.04 LTS
+добавляем пользователя в /etc/sudoers  (в моем случае username=user)
+user    ALL=(ALL:ALL) NOPASSWD: ALL
+
+Обновляемся:
+apt-get update
+apt-get upgrade
+
+reboot
+
+
+sudo su -
+
+1. Ставим postgres12 + TimescaleDB:
+
+Добавляем репозиторий PostgreSQL и TimescaleDB
+apt-get install software-properties-common
+apt-key adv --keyserver keyserver.ubuntu.com --recv-keys B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8
+add-apt-repository "deb http://apt.postgresql.org/pub/repos/apt/ `lsb_release -c -s`-pgdg main"
+add-apt-repository ppa:timescale/timescaledb-ppa
+apt-get update
+
+Установка:
+apt-get install timescaledb-postgresql-12
+
+отвечаем везде y:
+timescaledb-tune
+
+
+systemctl restart postgresql@12-main.service
+systemctl status postgresql@12-main.service
+systemctl enable postgresql@12-main.service
+
+2. установка zabbix
+groupadd zabbix
+useradd -g zabbix -s /bin/bash zabbix
+cd /tmp
+sudo -u postgres createuser --pwprompt zabbix (задаем пароль и записываем его)
+cd /tmp
+sudo -u postgres createdb -O zabbix -E Unicode -T template0 zabbix
+
+ставим server и frontend:
+wget https://repo.zabbix.com/zabbix/5.0/ubuntu/pool/main/z/zabbix-release/zabbix-release_5.0-1+focal_all.deb
+dpkg -i zabbix-release_5.0-1+focal_all.deb
+apt update
+apt install zabbix-server-pgsql zabbix-frontend-php php7.4-pgsql zabbix-nginx-conf (zabbix-agent - если хотим мониторить cервер с заббиксом)
+
+создаем все что надо в pgsql
+zcat /usr/share/doc/zabbix-server-pgsql*/create.sql.gz | sudo -u zabbix psql zabbix
+
+правим /etc/zabbix/zabbix_server.conf
+DBHost=localhost - оставляем
+DBName=zabbix - оставляем
+DBUser=zabbix - оставляем
+DBPassword= - здесь пишем пароль который записали ранее
+Timeout=4 - исправляем на 20
+
+в /etc/zabbix/php-fpm.conf раскомментируем последнюю строчку и пишем там таймзону
+
+nginx к этому моменту уже должен был поставиться автоматом когда ставили zabbix, проверяем, если нет, то 
+apt-get install nginx
+
+убираем дефолтовую страницу nginx-а и цепляем вместо нее страницу zabbix-а:
+ln -s /etc/zabbix/nginx.conf /etc/nginx/sites-enabled/zabbix
+rm /etc/nginx/sites-enabled/default
+перезапускаемЖ
+systemctl restart zabbix-server nginx php7.4-fpm
+на всякий случай:
+systemctl enable zabbix-server nginx php7.4-fpm
+теперь по адресу http://айпишник-сервера-zabbix должен появиться мастер первоначальной настройки
